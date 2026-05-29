@@ -27,6 +27,8 @@ def _build_runner(
     cost_weight: float,
     concurrency: int,
 ) -> BenchmarkRunner:
+    from voice_benchmarking_platform.providers.registry import get_provider_by_name
+
     config = BenchmarkConfig(
         wer_weight=wer_weight,
         latency_weight=latency_weight,
@@ -38,23 +40,15 @@ def _build_runner(
 
     for name in config.providers:
         name = name.strip()
-        if name == "openai_whisper":
-            from voice_benchmarking_platform.providers.openai_whisper import OpenAIWhisperProvider
-            key = os.environ.get("OPENAI_API_KEY", "")
-            if not key:
-                console.print("[red]OPENAI_API_KEY not set[/red]")
-                sys.exit(1)
-            runner.register(OpenAIWhisperProvider(api_key=key))
 
-        elif name == "deepgram":
-            from voice_benchmarking_platform.providers.deepgram import DeepgramProvider
-            key = os.environ.get("DEEPGRAM_API_KEY", "")
-            if not key:
-                console.print("[red]DEEPGRAM_API_KEY not set[/red]")
-                sys.exit(1)
-            runner.register(DeepgramProvider(api_key=key))
+        # Try YAML registry first
+        provider = get_provider_by_name(name)
+        if provider:
+            runner.register(provider)
+            continue
 
-        elif name == "assemblyai":
+        # Fallback: Python-coded providers (e.g. AssemblyAI that needs polling)
+        if name == "assemblyai":
             try:
                 from voice_benchmarking_platform.providers.assemblyai import AssemblyAIProvider
             except ImportError:

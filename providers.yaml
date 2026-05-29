@@ -1,0 +1,47 @@
+providers:
+  - name: openai_whisper
+    display_name: "OpenAI Whisper"
+    api_key_env: OPENAI_API_KEY
+    cost_per_minute_usd: 0.006
+    model_version: whisper-1
+    request:
+      method: POST
+      url: "https://api.openai.com/v1/audio/transcriptions"
+      auth:
+        type: bearer
+      body:
+        type: multipart
+        file_field: file
+        fields:
+          model: "{{model_version}}"
+          response_format: verbose_json
+    response:
+      transcript: text
+      duration: duration
+      language: language
+      confidence: ~
+      words: ~
+
+  - name: deepgram
+    display_name: "Deepgram Nova-2"
+    api_key_env: DEEPGRAM_API_KEY
+    cost_per_minute_usd: 0.0043
+    model_version: nova-2
+    request:
+      method: POST
+      url: "https://api.deepgram.com/v1/listen"
+      auth:
+        type: token
+      params:
+        model: "{{model_version}}"
+        smart_format: "true"
+        punctuate: "true"
+      body:
+        type: raw
+        content_type: audio/wav
+    response:
+      transcript: "results.channels[0].alternatives[0].transcript"
+      duration: "metadata.duration"
+      language: "metadata.detected_language"
+      confidence: "results.channels[0].alternatives[0].confidence"
+      words: "results.channels[0].alternatives[0].words"

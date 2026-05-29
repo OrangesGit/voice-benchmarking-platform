@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from voice_benchmarking_platform.benchmark import BenchmarkRunner
 from voice_benchmarking_platform.models import BenchmarkConfig, BenchmarkResult, ScoredResult
+from voice_benchmarking_platform.providers.registry import list_available_providers
 
 load_dotenv()
 
@@ -62,15 +63,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# ── Load provider registry ─────────────────────────────────────────────────────
+_yaml_providers = list_available_providers()
+# AssemblyAI is a Python-coded provider not in YAML; append it manually
+_all_providers = _yaml_providers + [
+    {"name": "assemblyai", "display_name": "AssemblyAI", "api_key_env": "ASSEMBLYAI_API_KEY"},
+]
+
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("⚙️ Configuration")
 
     st.subheader("Providers")
-    use_whisper = st.checkbox("OpenAI Whisper", value=True)
-    use_deepgram = st.checkbox("Deepgram Nova-2", value=True)
-    use_assemblyai = st.checkbox("AssemblyAI", value=False,
-                                  help="Requires poetry install --extras bonus")
+    _provider_checks: dict[str, bool] = {}
+    for _p in _all_providers:
+        _default = _p["name"] in ("openai_whisper", "deepgram")
+        _help = "Requires poetry install --extras bonus" if _p["name"] == "assemblyai" else None
+        _provider_checks[_p["name"]] = st.checkbox(
+            _p["display_name"], value=_default, help=_help
+        )
 
     st.divider()
     st.subheader("Scoring Weights")
@@ -98,8 +109,13 @@ with st.sidebar:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 RANK_EMOJI = {1: "🥇", 2: "🥈", 3: "🥉"}
 
+_SIDEBAR_KEY_MAP = {"openai_whisper": lambda: oa_key, "deepgram": lambda: dg_key, "assemblyai": lambda: ai_key}
+
+
 def _build_runner(providers: list[str], wer_weight: float, lat_weight: float,
                   cost_weight: float) -> BenchmarkRunner:
+    from voice_benchmarking_platform.providers.registry import get_provider_by_name
+
     config = BenchmarkConfig(
         wer_weight=wer_weight,
         latency_weight=lat_weight,
@@ -108,15 +124,20 @@ def _build_runner(providers: list[str], wer_weight: float, lat_weight: float,
     )
     runner = BenchmarkRunner(config)
     for name in providers:
-        if name == "openai_whisper":
-            from voice_benchmarking_platform.providers.openai_whisper import OpenAIWhisperProvider
-            runner.register(OpenAIWhisperProvider(api_key=oa_key or os.environ["OPENAI_API_KEY"]))
-        elif name == "deepgram":
-            from voice_benchmarking_platform.providers.deepgram import DeepgramProvider
-            runner.register(DeepgramProvider(api_key=dg_key or os.environ["DEEPGRAM_API_KEY"]))
-        elif name == "assemblyai":
+        sidebar_key = _SIDEBAR_KEY_MAP.get(name, lambda: "")()
+
+        # YAML registry (supports optional key override)
+        provider = get_provider_by_name(name, api_key=sidebar_key or None)
+        if provider:
+            runner.register(provider)
+            continue
+
+        # Fallback: AssemblyAI (Python-coded, needs polling — not expressible in YAML)
+        if name == "assemblyai":
             from voice_benchmarking_platform.providers.assemblyai import AssemblyAIProvider
-            runner.register(AssemblyAIProvider(api_key=ai_key or os.environ["ASSEMBLYAI_API_KEY"]))
+            key = sidebar_key or os.environ.get("ASSEMBLYAI_API_KEY", "")
+            runner.register(AssemblyAIProvider(api_key=key))
+
     return runner
 
 
@@ -203,13 +224,7 @@ with col_truth:
 st.divider()
 
 # Provider selection summary
-selected_providers = []
-if use_whisper:
-    selected_providers.append("openai_whisper")
-if use_deepgram:
-    selected_providers.append("deepgram")
-if use_assemblyai:
-    selected_providers.append("assemblyai")
+selected_providers = [name for name, checked in _provider_checks.items() if checked]
 
 if not selected_providers:
     st.warning("Select at least one provider in the sidebar.")
