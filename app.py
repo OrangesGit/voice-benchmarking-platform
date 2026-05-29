@@ -122,6 +122,38 @@ with st.sidebar:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 RANK_EMOJI = {1: "🥇", 2: "🥈", 3: "🥉"}
 
+_SORT_OPTIONS: dict[str, tuple[str, bool]] = {
+    "Composite Score": ("composite_score", False),   # (key, reverse)
+    "WER":             ("wer",             False),
+    "Latency (TTFT)":  ("ttft",            False),
+    "Cost":            ("cost",            False),
+    "Confidence":      ("confidence",      True),    # higher = better
+}
+
+
+def _sort_scored(scored: list, sort_label: str) -> list:
+    """Return a re-sorted copy with ranks re-assigned."""
+    key_name, reverse = _SORT_OPTIONS[sort_label]
+
+    def _key(s):
+        if key_name == "composite_score":
+            return s.composite_score
+        if key_name == "wer":
+            return s.wer if s.wer is not None else float("inf")
+        if key_name == "ttft":
+            return s.result.ttft_seconds or s.result.total_seconds
+        if key_name == "cost":
+            return s.result.cost_usd
+        if key_name == "confidence":
+            return s.result.confidence if s.result.confidence is not None else -1.0
+        return 0.0
+
+    from copy import deepcopy
+    reordered = sorted(deepcopy(scored), key=_key, reverse=reverse)
+    for i, s in enumerate(reordered):
+        s.rank = i + 1
+    return reordered
+
 
 def _fmt_provider(provider: str) -> str:
     """Format 'deepgram:nova-2' → 'deepgram (nova-2)' for display."""
@@ -295,17 +327,30 @@ if run_btn:
 
     with st.spinner(f"Calling {len(selected_providers)} provider(s) in parallel…"):
         try:
-            result = _run_benchmark(audio_path, gt, selected_providers)
+            st.session_state["benchmark_result"] = _run_benchmark(audio_path, gt, selected_providers)
         except Exception as e:
             st.error(f"Benchmark failed: {e}")
             st.stop()
 
-    scored = result.scored_results
+if "benchmark_result" in st.session_state:
+    result = st.session_state["benchmark_result"]
     st.success(f"Done — Run ID: `{result.run_id}`")
     st.divider()
 
-    # ── Leaderboard cards ──────────────────────────────────────────────────────
-    st.subheader("🏆 Leaderboard")
+    # ── Leaderboard ────────────────────────────────────────────────────────────
+    lb_header, lb_sort = st.columns([2, 3])
+    with lb_header:
+        st.subheader("🏆 Leaderboard")
+    with lb_sort:
+        sort_label = st.radio(
+            "Sort by",
+            options=list(_SORT_OPTIONS.keys()),
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+    scored = _sort_scored(result.scored_results, sort_label)
+
     card_cols = st.columns(len(scored))
     for col, s in zip(card_cols, scored):
         r = s.result
@@ -316,12 +361,32 @@ if run_btn:
         agree = r.metadata.get("agreement_rank")
 
         with col:
+            _key_name, _ = _SORT_OPTIONS[sort_label]
+            if _key_name == "composite_score":
+                _primary_val = f"{s.composite_score:.4f}"
+                _primary_label = "composite score"
+            elif _key_name == "wer":
+                _primary_val = f"{s.wer:.3f}" if s.wer is not None else "N/A"
+                _primary_label = "WER"
+            elif _key_name == "ttft":
+                _v = r.ttft_seconds or r.total_seconds
+                _primary_val = f"{_v:.2f}s"
+                _primary_label = "TTFT"
+            elif _key_name == "cost":
+                _primary_val = f"${r.cost_usd:.5f}"
+                _primary_label = "Cost"
+            elif _key_name == "confidence":
+                _primary_val = f"{r.confidence:.3f}" if r.confidence is not None else "N/A"
+                _primary_label = "Confidence"
+            else:
+                _primary_val, _primary_label = f"{s.composite_score:.4f}", "composite score"
+
             st.markdown(f"""
 <div class="metric-card">
   <div class="rank-badge">{RANK_EMOJI.get(s.rank or 0, f"#{s.rank}")}</div>
   <div class="provider-name">{_fmt_provider(r.provider)}</div>
-  <div class="score-val">{s.composite_score:.4f}</div>
-  <small style="color:#a6adc8">composite score</small>
+  <div class="score-val">{_primary_val}</div>
+  <small style="color:#a6adc8">{_primary_label}</small>
 </div>""", unsafe_allow_html=True)
             st.markdown("")
             mc1, mc2 = st.columns(2)
