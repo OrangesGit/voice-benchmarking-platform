@@ -41,6 +41,9 @@ def render_leaderboard(
         show_lines=True,
         highlight=True,
     )
+    has_ground_truth = any(s.wer is not None for s in sorted_results)
+    has_agreement = any("agreement_rank" in s.result.metadata for s in sorted_results)
+
     table.add_column("Rank", style="bold yellow", justify="center", width=6)
     table.add_column("Provider", style="bold cyan", justify="left", width=18)
     table.add_column("WER", style="green", justify="right", width=8)
@@ -50,6 +53,8 @@ def render_leaderboard(
     table.add_column("Confidence", style="magenta", justify="right", width=11)
     table.add_column("Cost (USD)", style="magenta", justify="right", width=12)
     table.add_column("Score", style="bold white", justify="right", width=8)
+    if has_agreement and not has_ground_truth:
+        table.add_column("Agree Rank", style="yellow", justify="center", width=11)
     table.add_column("Transcript", style="dim", justify="left", min_width=20, max_width=50)
 
     for s in sorted_results:
@@ -59,10 +64,9 @@ def render_leaderboard(
         ttft_str = f"{r.ttft_seconds:.3f}" if r.ttft_seconds is not None else "N/A"
         conf_str = f"{r.confidence:.3f}" if r.confidence is not None else "N/A"
         transcript_preview = r.transcript[:80] + ("…" if len(r.transcript) > 80 else "")
-
         rank_emoji = {1: "🥇", 2: "🥈", 3: "🥉"}.get(s.rank or 0, str(s.rank))
 
-        table.add_row(
+        row = [
             rank_emoji,
             r.provider,
             wer_str,
@@ -72,8 +76,14 @@ def render_leaderboard(
             conf_str,
             f"${r.cost_usd:.5f}",
             f"{s.composite_score:.4f}",
-            transcript_preview,
-        )
+        ]
+        if has_agreement and not has_ground_truth:
+            agree_rank = r.metadata.get("agreement_rank")
+            peer_wer = r.metadata.get("avg_peer_wer")
+            agree_str = f"#{agree_rank} ({peer_wer:.3f})" if agree_rank else "N/A"
+            row.append(agree_str)
+        row.append(transcript_preview)
+        table.add_row(*row)
 
     c.print()
     c.print(table)

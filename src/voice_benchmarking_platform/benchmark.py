@@ -36,6 +36,11 @@ class BenchmarkRunner:
         for i, s in enumerate(scored):
             s.rank = i + 1
 
+        # Augment with inter-provider agreement data when no ground truth
+        if ground_truth is None and len(scored) > 1:
+            from voice_benchmarking_platform.evaluator import apply_no_ground_truth_ranks
+            apply_no_ground_truth_ranks(scored)
+
         return BenchmarkResult(
             audio_file=str(audio_path),
             ground_truth=ground_truth,
