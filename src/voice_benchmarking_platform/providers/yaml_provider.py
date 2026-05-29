@@ -56,24 +56,32 @@ def _build_auth_header(auth_cfg: dict, api_key: str) -> dict[str, str]:
 class YAMLProvider(STTProvider):
     """STT provider whose HTTP behaviour is fully described by a YAML config block."""
 
-    def __init__(self, config: dict, api_key: str) -> None:
+    def __init__(self, config: dict, api_key: str, model: str | None = None) -> None:
         self._cfg = config
         self._api_key = api_key
+        self._model = model or config.get("model_version", "")
         self._tpl_ctx = {
-            "model_version": config.get("model_version", ""),
+            "model_version": self._model,
             "api_key": api_key,
         }
 
     @property
     def provider_name(self) -> str:
-        return self._cfg["name"]
+        return f"{self._cfg['name']}:{self._model}"
 
     @property
     def display_name(self) -> str:
-        return self._cfg.get("display_name", self._cfg["name"])
+        base = self._cfg.get("display_name", self._cfg["name"])
+        for m in self._cfg.get("available_models", []):
+            if m["id"] == self._model:
+                return f"{base} ({m.get('display_name', self._model)})"
+        return f"{base} ({self._model})"
 
     @property
     def cost_per_minute_usd(self) -> float:
+        for m in self._cfg.get("available_models", []):
+            if m["id"] == self._model and "cost_per_minute_usd" in m:
+                return float(m["cost_per_minute_usd"])
         return float(self._cfg["cost_per_minute_usd"])
 
     async def transcribe_async(self, audio_path: Path) -> TranscriptionResult:
@@ -155,7 +163,7 @@ class YAMLProvider(STTProvider):
             ttft_seconds=ttft,
             total_seconds=total_seconds,
             cost_usd=self._calculate_cost(duration),
-            model_version=self._cfg.get("model_version", ""),
+            model_version=self._model,
             confidence=float(confidence) if confidence is not None else None,
             metadata={
                 "duration_seconds": duration,

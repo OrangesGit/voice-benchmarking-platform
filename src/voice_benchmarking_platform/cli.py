@@ -40,15 +40,16 @@ def _build_runner(
 
     for name in config.providers:
         name = name.strip()
+        base_name = name.split(":")[0]
 
-        # Try YAML registry first
+        # YAML registry handles both "provider" and "provider:model" formats
         provider = get_provider_by_name(name)
         if provider:
             runner.register(provider)
             continue
 
-        # Fallback: Python-coded providers (e.g. AssemblyAI that needs polling)
-        if name == "assemblyai":
+        # Fallback: AssemblyAI (Python-coded, needs polling)
+        if base_name == "assemblyai":
             try:
                 from voice_benchmarking_platform.providers.assemblyai import AssemblyAIProvider
             except ImportError:
@@ -75,7 +76,8 @@ def cli() -> None:
 @cli.command()
 @click.option("--audio", required=True, type=click.Path(exists=True, path_type=Path), help="Audio file path")
 @click.option("--truth", default=None, help="Ground truth transcript (optional)")
-@click.option("--providers", default="openai_whisper,deepgram", show_default=True, help="Comma-separated provider list")
+@click.option("--providers", default="openai_whisper,deepgram", show_default=True,
+              help="Comma-separated providers. Use provider:model to pin a model, e.g. deepgram:nova-2,openai_whisper:whisper-1")
 @click.option("--wer-weight", default=0.5, show_default=True, type=float)
 @click.option("--latency-weight", default=0.3, show_default=True, type=float)
 @click.option("--cost-weight", default=0.2, show_default=True, type=float)

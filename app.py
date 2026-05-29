@@ -76,12 +76,25 @@ with st.sidebar:
 
     st.subheader("Providers")
     _provider_checks: dict[str, bool] = {}
+    _provider_models: dict[str, str] = {}
     for _p in _all_providers:
         _default = _p["name"] in ("openai_whisper", "deepgram")
         _help = "Requires poetry install --extras bonus" if _p["name"] == "assemblyai" else None
         _provider_checks[_p["name"]] = st.checkbox(
             _p["display_name"], value=_default, help=_help
         )
+        _models = _p.get("available_models", [])
+        if _models and _provider_checks[_p["name"]]:
+            _default_model = _p.get("default_model", _models[0]["id"])
+            _default_idx = next((i for i, m in enumerate(_models) if m["id"] == _default_model), 0)
+            _provider_models[_p["name"]] = st.selectbox(
+                "↳ Model",
+                options=[m["id"] for m in _models],
+                index=_default_idx,
+                key=f"model_{_p['name']}",
+            )
+        else:
+            _provider_models[_p["name"]] = _p.get("default_model", "")
 
     st.divider()
     st.subheader("Scoring Weights")
@@ -109,6 +122,14 @@ with st.sidebar:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 RANK_EMOJI = {1: "🥇", 2: "🥈", 3: "🥉"}
 
+
+def _fmt_provider(provider: str) -> str:
+    """Format 'deepgram:nova-2' → 'deepgram (nova-2)' for display."""
+    if ":" in provider:
+        base, model = provider.split(":", 1)
+        return f"{base}<br><small style='color:#a6adc8'>{model}</small>"
+    return provider
+
 _SIDEBAR_KEY_MAP = {"openai_whisper": lambda: oa_key, "deepgram": lambda: dg_key, "assemblyai": lambda: ai_key}
 
 
@@ -124,16 +145,17 @@ def _build_runner(providers: list[str], wer_weight: float, lat_weight: float,
     )
     runner = BenchmarkRunner(config)
     for name in providers:
-        sidebar_key = _SIDEBAR_KEY_MAP.get(name, lambda: "")()
+        base_name = name.split(":")[0]
+        sidebar_key = _SIDEBAR_KEY_MAP.get(base_name, lambda: "")()
 
-        # YAML registry (supports optional key override)
+        # YAML registry handles "provider:model" format
         provider = get_provider_by_name(name, api_key=sidebar_key or None)
         if provider:
             runner.register(provider)
             continue
 
         # Fallback: AssemblyAI (Python-coded, needs polling — not expressible in YAML)
-        if name == "assemblyai":
+        if base_name == "assemblyai":
             from voice_benchmarking_platform.providers.assemblyai import AssemblyAIProvider
             key = sidebar_key or os.environ.get("ASSEMBLYAI_API_KEY", "")
             runner.register(AssemblyAIProvider(api_key=key))
@@ -223,8 +245,11 @@ with col_truth:
 
 st.divider()
 
-# Provider selection summary
-selected_providers = [name for name, checked in _provider_checks.items() if checked]
+# Provider selection summary — emit "provider:model" identifiers
+selected_providers = [
+    f"{name}:{_provider_models[name]}" if _provider_models.get(name) else name
+    for name, checked in _provider_checks.items() if checked
+]
 
 if not selected_providers:
     st.warning("Select at least one provider in the sidebar.")
@@ -280,7 +305,7 @@ if run_btn:
             st.markdown(f"""
 <div class="metric-card">
   <div class="rank-badge">{RANK_EMOJI.get(s.rank or 0, f"#{s.rank}")}</div>
-  <div class="provider-name">{r.provider}</div>
+  <div class="provider-name">{_fmt_provider(r.provider)}</div>
   <div class="score-val">{s.composite_score:.4f}</div>
   <small style="color:#a6adc8">composite score</small>
 </div>""", unsafe_allow_html=True)

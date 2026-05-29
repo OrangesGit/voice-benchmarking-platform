@@ -1,8 +1,4 @@
-"""YAML-driven provider registry.
-
-Load providers.yaml and instantiate YAMLProvider objects for each entry.
-Python-coded providers (e.g. AssemblyAI) are returned via get_python_providers().
-"""
+"""YAML-driven provider registry."""
 from __future__ import annotations
 
 import os
@@ -16,26 +12,25 @@ from voice_benchmarking_platform.providers.yaml_provider import YAMLProvider
 _DEFAULT_YAML = Path(__file__).parents[3] / "providers.yaml"
 
 
-def load_yaml_providers(yaml_path: Path | None = None) -> list[YAMLProvider]:
-    """Parse providers.yaml and return a list of YAMLProvider instances.
-
-    API keys are read from environment variables named by each entry's
-    ``api_key_env`` field. Providers whose key is missing are skipped.
-    """
+def _load_raw(yaml_path: Path | None) -> list[dict]:
     path = yaml_path or _DEFAULT_YAML
     if not path.exists():
         return []
-
     with path.open() as f:
-        data = yaml.safe_load(f)
+        return yaml.safe_load(f).get("providers", [])
 
+
+def load_yaml_providers(yaml_path: Path | None = None) -> list[YAMLProvider]:
+    """Return one YAMLProvider per entry (using the default model).
+
+    Providers whose API key is missing are skipped.
+    """
     providers: list[YAMLProvider] = []
-    for cfg in data.get("providers", []):
-        key_env = cfg.get("api_key_env", "")
-        api_key = os.environ.get(key_env, "")
-        if not api_key:
+    for cfg in _load_raw(yaml_path):
+        key = os.environ.get(cfg.get("api_key_env", ""), "")
+        if not key:
             continue
-        providers.append(YAMLProvider(config=cfg, api_key=api_key))
+        providers.append(YAMLProvider(config=cfg, api_key=key))
     return providers
 
 
@@ -44,46 +39,35 @@ def get_provider_by_name(
     api_key: str | None = None,
     yaml_path: Path | None = None,
 ) -> STTProvider | None:
-    """Return the provider matching ``name``, or None if not found.
+    """Return a provider for ``name``, which may be ``provider`` or ``provider:model``.
 
     ``api_key`` overrides the environment variable when provided.
     """
-    path = yaml_path or _DEFAULT_YAML
-    if not path.exists():
-        return None
+    base_name, model = (name.split(":", 1) + [None])[:2]  # type: ignore[list-item]
 
-    with path.open() as f:
-        data = yaml.safe_load(f)
-
-    for cfg in data.get("providers", []):
-        if cfg["name"] != name:
+    for cfg in _load_raw(yaml_path):
+        if cfg["name"] != base_name:
             continue
-        key_env = cfg.get("api_key_env", "")
-        key = api_key or os.environ.get(key_env, "")
+        key = api_key or os.environ.get(cfg.get("api_key_env", ""), "")
         if not key:
             return None
-        return YAMLProvider(config=cfg, api_key=key)
+        return YAMLProvider(config=cfg, api_key=key, model=model)
     return None
 
 
 def list_available_providers(yaml_path: Path | None = None) -> list[dict]:
-    """Return metadata (name, display_name, api_key_env) for every YAML-defined provider.
+    """Return display metadata for every YAML-defined provider, including model lists.
 
-    Entries are returned regardless of whether the API key is set, so the UI
-    can render them all and signal which ones need configuration.
+    Returned regardless of whether the API key is set, so the UI can render
+    all options and indicate which ones need configuration.
     """
-    path = yaml_path or _DEFAULT_YAML
-    if not path.exists():
-        return []
-
-    with path.open() as f:
-        data = yaml.safe_load(f)
-
     return [
         {
             "name": cfg["name"],
             "display_name": cfg.get("display_name", cfg["name"]),
             "api_key_env": cfg.get("api_key_env", ""),
+            "default_model": cfg.get("model_version", ""),
+            "available_models": cfg.get("available_models", []),
         }
-        for cfg in data.get("providers", [])
+        for cfg in _load_raw(yaml_path)
     ]

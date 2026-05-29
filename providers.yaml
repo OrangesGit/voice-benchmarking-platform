@@ -4,6 +4,16 @@ providers:
     api_key_env: OPENAI_API_KEY
     cost_per_minute_usd: 0.006
     model_version: whisper-1
+    available_models:
+      - id: whisper-1
+        display_name: "Whisper-1"
+        cost_per_minute_usd: 0.006
+      - id: gpt-4o-transcribe
+        display_name: "GPT-4o Transcribe"
+        cost_per_minute_usd: 0.006
+      - id: gpt-4o-mini-transcribe
+        display_name: "GPT-4o Mini Transcribe"
+        cost_per_minute_usd: 0.003
     request:
       method: POST
       url: "https://api.openai.com/v1/audio/transcriptions"
@@ -23,10 +33,23 @@ providers:
       words: ~
 
   - name: deepgram
-    display_name: "Deepgram Nova-2"
+    display_name: "Deepgram"
     api_key_env: DEEPGRAM_API_KEY
     cost_per_minute_usd: 0.0043
     model_version: nova-2
+    available_models:
+      - id: nova-2
+        display_name: "Nova-2"
+        cost_per_minute_usd: 0.0043
+      - id: nova-2-general
+        display_name: "Nova-2 General"
+        cost_per_minute_usd: 0.0043
+      - id: enhanced
+        display_name: "Enhanced"
+        cost_per_minute_usd: 0.0043
+      - id: base
+        display_name: "Base"
+        cost_per_minute_usd: 0.0025
     request:
       method: POST
       url: "https://api.deepgram.com/v1/listen"
