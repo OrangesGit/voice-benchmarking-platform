@@ -76,25 +76,25 @@ with st.sidebar:
 
     st.subheader("Providers")
     _provider_checks: dict[str, bool] = {}
-    _provider_models: dict[str, str] = {}
+    _provider_models: dict[str, list[str]] = {}
     for _p in _all_providers:
         _default = _p["name"] in ("openai_whisper", "deepgram")
         _help = "Requires poetry install --extras bonus" if _p["name"] == "assemblyai" else None
         _provider_checks[_p["name"]] = st.checkbox(
             _p["display_name"], value=_default, help=_help
         )
-        _models = _p.get("available_models", [])
-        if _models and _provider_checks[_p["name"]]:
-            _default_model = _p.get("default_model", _models[0]["id"])
-            _default_idx = next((i for i, m in enumerate(_models) if m["id"] == _default_model), 0)
-            _provider_models[_p["name"]] = st.selectbox(
-                "↳ Model",
-                options=[m["id"] for m in _models],
-                index=_default_idx,
+        _avail = _p.get("available_models", [])
+        if _avail and _provider_checks[_p["name"]]:
+            _default_model = _p.get("default_model", _avail[0]["id"])
+            _provider_models[_p["name"]] = st.multiselect(
+                "↳ Models",
+                options=[m["id"] for m in _avail],
+                default=[_default_model],
                 key=f"model_{_p['name']}",
             )
         else:
-            _provider_models[_p["name"]] = _p.get("default_model", "")
+            _dm = _p.get("default_model", "")
+            _provider_models[_p["name"]] = [_dm] if _dm else []
 
     st.divider()
     st.subheader("Scoring Weights")
@@ -245,20 +245,34 @@ with col_truth:
 
 st.divider()
 
-# Provider selection summary — emit "provider:model" identifiers
-selected_providers = [
-    f"{name}:{_provider_models[name]}" if _provider_models.get(name) else name
-    for name, checked in _provider_checks.items() if checked
-]
+# Expand each enabled provider into one entry per selected model
+selected_providers: list[str] = []
+for _name, _checked in _provider_checks.items():
+    if not _checked:
+        continue
+    _sel_models = _provider_models.get(_name, [])
+    if _sel_models:
+        selected_providers.extend(f"{_name}:{m}" for m in _sel_models)
+    else:
+        selected_providers.append(_name)  # no model list (e.g. AssemblyAI)
+
+# Warn when a provider is checked but all models were deselected
+for _name, _checked in _provider_checks.items():
+    if _checked and _provider_models.get(_name) == [] and _all_providers[0].get("available_models"):
+        st.sidebar.warning(f"{_name}: no model selected")
 
 if not selected_providers:
     st.warning("Select at least one provider in the sidebar.")
     st.stop()
 
-run_col, _ = st.columns([1, 3])
+run_col, info_col = st.columns([1, 3])
 with run_col:
     run_btn = st.button("▶ Run Benchmark", type="primary", use_container_width=True,
                         disabled=not selected_providers)
+with info_col:
+    if selected_providers:
+        st.caption(f"**{len(selected_providers)} configuration(s)** will run in parallel: "
+                   + " · ".join(f"`{p}`" for p in selected_providers))
 
 if run_btn:
     # Resolve audio path
