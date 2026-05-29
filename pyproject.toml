@@ -16,6 +16,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "openai>=1.30",
     "deepgram-sdk>=3.4",
+    "streamlit>=1.35",
+    "plotly>=5.22",
 ]
 
 [project.optional-dependencies]
