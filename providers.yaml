@@ -11,9 +11,15 @@ providers:
       - id: gpt-4o-transcribe
         display_name: "GPT-4o Transcribe"
         cost_per_minute_usd: 0.006
+        body_fields:                     # verbose_json not supported; override to json
+          model: "{{model_version}}"
+          response_format: json
       - id: gpt-4o-mini-transcribe
         display_name: "GPT-4o Mini Transcribe"
         cost_per_minute_usd: 0.003
+        body_fields:                     # verbose_json not supported; override to json
+          model: "{{model_version}}"
+          response_format: json
     request:
       method: POST
       url: "https://api.openai.com/v1/audio/transcriptions"

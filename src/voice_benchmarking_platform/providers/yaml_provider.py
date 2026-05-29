@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,15 @@ def _extract(data: Any, path: str | None) -> Any:
         else:
             data = data.get(part) if isinstance(data, dict) else None
     return data
+
+
+def _wav_duration(audio_path: Path) -> float:
+    """Read duration from a WAV header; returns 0.0 for non-WAV or unreadable files."""
+    try:
+        with wave.open(str(audio_path), "rb") as w:
+            return w.getnframes() / w.getframerate()
+    except Exception:
+        return 0.0
 
 
 def _build_auth_header(auth_cfg: dict, api_key: str) -> dict[str, str]:
@@ -105,12 +115,18 @@ class YAMLProvider(STTProvider):
         ttft: float | None = None
         chunks: list[bytes] = []
 
+        # Model-level body_fields override takes priority over provider-level fields
+        _model_cfg = next(
+            (m for m in self._cfg.get("available_models", []) if m["id"] == self._model), {}
+        )
+        _body_fields = _model_cfg.get("body_fields") or body_cfg.get("fields", {})
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             if body_type == "multipart":
                 file_field = body_cfg.get("file_field", "file")
                 extra_fields = {
                     k: _resolve_templates(str(v), self._tpl_ctx)
-                    for k, v in body_cfg.get("fields", {}).items()
+                    for k, v in _body_fields.items()
                 }
                 files = {file_field: (audio_path.name, audio_bytes, "audio/wav")}
                 async with client.stream(
@@ -146,6 +162,8 @@ class YAMLProvider(STTProvider):
 
         transcript = str(_extract(body, resp_cfg.get("transcript")) or "").strip()
         duration = float(_extract(body, resp_cfg.get("duration")) or 0.0)
+        if duration == 0.0:
+            duration = _wav_duration(audio_path)
         language = _extract(body, resp_cfg.get("language"))
         confidence = _extract(body, resp_cfg.get("confidence"))
         words = _extract(body, resp_cfg.get("words")) or []
