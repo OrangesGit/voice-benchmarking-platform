@@ -18,17 +18,25 @@
 
 ## 1. 前置条件
 
-### 1.1 API Keys
+### 1.1 支持的 Provider 与模型
 
-平台支持以下三个 STT 服务，使用前需申请对应的 API Key：
+| Provider | 模型 | 费率 / 分钟 | 置信度 | 备注 |
+|----------|------|-----------|--------|------|
+| **OpenAI** | `whisper-1` | $0.006 | — | 经典模型 |
+| | `gpt-4o-transcribe` | $0.006 | — | 更高准确率 |
+| | `gpt-4o-mini-transcribe` | $0.003 | — | 最低成本 |
+| **Deepgram** | `nova-2` | $0.0043 | ✓ 词级 | 默认，综合最优 |
+| | `nova-2-general` | $0.0043 | ✓ 词级 | nova-2 别名 |
+| | `enhanced` | $0.0043 | ✓ 词级 | 旧一代 |
+| | `base` | $0.0025 | ✓ 词级 | 最低成本 |
+| **AssemblyAI** | best | $0.0037 | ✓ | 需额外安装 |
 
-| Provider | 申请地址 | 费率 | 备注 |
-|----------|---------|------|------|
-| OpenAI Whisper | platform.openai.com | $0.006 / 分钟 | 无置信度返回 |
-| Deepgram Nova-2 | console.deepgram.com | $0.0043 / 分钟 | 提供词级置信度 |
-| AssemblyAI | www.assemblyai.com | $0.0037 / 分钟 | 需额外安装，见第 2 节 |
+**推荐起步组合**：Deepgram（有免费额度）+ OpenAI，涵盖两家主流服务的多个模型对比。
 
-**推荐先申请 Deepgram（有免费额度）和 OpenAI，即可完成主要对比。**
+申请地址：
+- OpenAI：platform.openai.com
+- Deepgram：console.deepgram.com
+- AssemblyAI：www.assemblyai.com
 
 ### 1.2 系统环境
 
@@ -70,19 +78,21 @@ ASSEMBLYAI_API_KEY=xxxxxxxxxxxxxxxx   # 可选
 poetry run streamlit run app.py
 ```
 
-浏览器自动打开 `http://localhost:8501`，出现如下界面：
+浏览器自动打开 `http://localhost:8501`：
 
 ```
-左侧边栏                    主区域
-─────────────────────────   ────────────────────────────────
-⚙️ Configuration             1. Upload Audio
-                             [文件上传] 或 [使用内置样本]
+左侧边栏                       主区域
+──────────────────────────     ──────────────────────────────────
+⚙️ Configuration                1. Upload Audio
+                                [文件上传] 或 [使用内置样本]
 Providers
-☑ OpenAI Whisper             2. Ground Truth (optional)
-☑ Deepgram Nova-2            [输入预期转录文本]
-☐ AssemblyAI
+☑ OpenAI Whisper               2. Ground Truth (optional)
+  ↳ Models [whisper-1 ×]       [输入预期转录文本]
+☑ Deepgram
+  ↳ Models [nova-2 ×]          [▶ Run Benchmark]
+☐ AssemblyAI                   2 configuration(s) will run in parallel
 
-Scoring Weights              [▶ Run Benchmark]
+Scoring Weights
 WER (Accuracy)  ████░  0.50
 Latency (TTFT)  ███░░  0.30
 Cost (auto)            0.20
@@ -90,9 +100,15 @@ Cost (auto)            0.20
 
 ### 3.2 操作步骤
 
-**Step 1 — 选择要对比的 Provider**
+**Step 1 — 选择 Provider 和模型**
 
-在左侧勾选想对比的 STT 服务。默认勾选 OpenAI Whisper 和 Deepgram Nova-2。
+在左侧勾选 STT 服务，勾选后会出现 `↳ Models` 多选框：
+- **单模型**：直接使用默认选中的模型
+- **多模型**：点击下拉追加模型，同一供应商的多个模型会同时参与评测
+- 可跨供应商同时选多个，例如 Deepgram nova-2 + Deepgram base + OpenAI whisper-1
+
+主区域会实时显示本次将并行运行的配置数量：
+> `3 configuration(s) will run in parallel: deepgram:nova-2 · deepgram:base · openai_whisper:whisper-1`
 
 **Step 2 — 上传音频**
 
@@ -107,8 +123,6 @@ Ground Truth 是**你已知的正确转录文本**。
 - **不填写**：平台改用「提供商间一致性评分」（Agreement Rank），不需要人工校对
 
 **Step 4 — 调整权重（可选）**
-
-权重决定三个维度的重要程度：
 
 | 场景 | WER | Latency | Cost |
 |------|-----|---------|------|
@@ -125,19 +139,29 @@ Ground Truth 是**你已知的正确转录文本**。
 
 ### 3.3 结果页说明
 
-**🏆 Leaderboard（排行榜卡片）**
+**🏆 Leaderboard（排行榜）**
+
+排行榜上方有排序控件：
 
 ```
-🥇                          🥈
-deepgram                    openai_whisper
-0.4683                      0.4971
-composite score             composite score
+Sort by  ● Composite Score  ○ WER  ○ Latency (TTFT)  ○ Cost  ○ Confidence
+```
 
-WER    0.533  CER    1.536   WER    0.644  CER    1.548
-TTFT   3.33s  Conf.  0.901   TTFT   2.88s  Conf.  N/A
-Cost   $0.000 Total  3.33s   Cost   $0.000 Total  2.88s
+点击任意维度，卡片立即重排，🥇🥈🥉 重新分配，卡片中央大数字切换为对应指标值。切换排序不需要重新跑 benchmark（结果缓存在页面中）。
 
-"Welcome to the voice bench…"   "Welcome to the voice bench…"
+每张卡片包含：
+
+```
+🥇
+deepgram (nova-2)
+0.4683
+composite score
+
+WER    0.533   CER    1.536
+TTFT   3.33s   Conf.  0.901
+Cost  $0.000   Total  3.33s
+
+"Welcome to the voice bench…"
 ```
 
 **📊 Metric Comparison（六张图表）**
@@ -151,7 +175,7 @@ Cost   $0.000 Total  3.33s   Cost   $0.000 Total  2.88s
 | Avg Word Confidence | 词级置信度（0–1） | ✗ 越高越好 |
 | Composite Score | 综合评分 | ✓ 越低越好 |
 
-> 绿色高亮柱 = 该指标最优的 provider。
+> 绿色高亮柱 = 该指标最优的配置。
 
 **📄 Raw JSON result**
 
@@ -171,11 +195,21 @@ poetry run benchmark run \
   --audio tests/fixtures/sample.wav \
   --truth "the weather today is partly cloudy with a high of seventy two degrees"
 
-# 只测一个 provider
+# 指定单个 provider（用默认模型）
 poetry run benchmark run \
   --audio my_audio.wav \
   --truth "预期文本" \
   --providers deepgram
+
+# 指定 provider:model（固定模型）
+poetry run benchmark run \
+  --audio my_audio.wav \
+  --providers openai_whisper:gpt-4o-mini-transcribe,deepgram:nova-2
+
+# 同一供应商多个模型对比
+poetry run benchmark run \
+  --audio my_audio.wav \
+  --providers deepgram:nova-2,deepgram:base
 
 # 无 ground truth 模式（自动一致性评分）
 poetry run benchmark run \
@@ -194,7 +228,7 @@ poetry run benchmark run \
 |------|-------|------|
 | `--audio` | 必填 | 音频文件路径（WAV/MP3/M4A） |
 | `--truth` | 空 | 预期转录文本（不填则无 GT 模式） |
-| `--providers` | `openai_whisper,deepgram` | 逗号分隔的 provider 列表 |
+| `--providers` | `openai_whisper,deepgram` | 逗号分隔；支持 `provider:model` 格式 |
 | `--wer-weight` | 0.5 | WER 权重（0–1） |
 | `--latency-weight` | 0.3 | 延迟权重（0–1） |
 | `--cost-weight` | 0.2 | 成本权重（0–1） |
@@ -203,7 +237,7 @@ poetry run benchmark run \
 
 ### 4.2 批量测试（多个文件）
 
-**第一步：准备 CSV manifest 文件**
+**准备 CSV manifest 文件：**
 
 ```csv
 audio_file,ground_truth
@@ -214,7 +248,7 @@ samples/clip3.wav,
 
 > `ground_truth` 列可留空（表示无 GT 模式）。
 
-**第二步：运行批量测试**
+**运行批量测试：**
 
 ```bash
 poetry run benchmark batch \
@@ -223,15 +257,13 @@ poetry run benchmark batch \
   --output results.json
 ```
 
-参数说明：
-
 | 参数 | 默认值 | 说明 |
 |------|-------|------|
 | `--manifest` | 必填 | CSV 文件路径 |
 | `--concurrency` | 5 | 同时处理的文件数 |
 | `--output` | `results.json` | 结果保存路径 |
 
-**第三步：查看排行榜**
+**查看排行榜：**
 
 ```bash
 # 按综合分排序
@@ -244,16 +276,15 @@ poetry run benchmark leaderboard --input results.json --sort-by wer
 ### 4.3 CLI 输出示例
 
 ```
-Run ID: f13c21af  Audio: sample.wav
-Ground Truth: the weather today is partly cloudy…
+Benchmarking: sample.wav with providers: deepgram:nova-2,deepgram:base
 
                    STT Provider Benchmark Leaderboard
-╭────┬────────────────┬───────┬───────┬───────┬────────┬────────┬──────────╮
-│ R… │ Provider       │   WER │   CER │  TTFT │  Total │  Conf. │  Cost    │
-├────┼────────────────┼───────┼───────┼───────┼────────┼────────┼──────────┤
-│ 🥇 │ deepgram       │ 0.533 │ 1.536 │ 3.33s │  3.33s │  0.901 │ $0.00061 │
-│ 🥈 │ openai_whisper │ 0.644 │ 1.548 │ 2.88s │  2.88s │    N/A │ $0.00085 │
-╰────┴────────────────┴───────┴───────┴───────┴────────┴────────┴──────────╯
+╭────┬───────────────┬───────┬───────┬───────┬────────┬────────┬──────────╮
+│ R… │ Provider      │   WER │   CER │  TTFT │  Total │  Conf. │  Cost    │
+├────┼───────────────┼───────┼───────┼───────┼────────┼────────┼──────────┤
+│ 🥇 │ deepgram:base │   N/A │   N/A │ 2.76s │  2.76s │  0.942 │ $0.00036 │
+│ 🥈 │ deepgram:nova-2│   N/A │   N/A │ 2.92s │  2.92s │  0.901 │ $0.00061 │
+╰────┴───────────────┴───────┴───────┴───────┴────────┴────────┴──────────╯
 ```
 
 ---
@@ -280,7 +311,7 @@ WER = (替换词数 + 删除词数 + 插入词数) / 参考总词数
 
 **Confidence — 置信度**
 
-Provider 对自己转录结果的置信程度（0–1）。置信度低的词可用于后处理高亮"不确定词"提示用户核对。注意：OpenAI Whisper 不返回置信度。
+Provider 对自己转录结果的置信程度（0–1）。置信度低的词可用于后处理高亮"不确定词"提示用户核对。注意：OpenAI 系列模型不返回置信度。
 
 **Composite Score — 综合评分**
 
@@ -301,13 +332,23 @@ Composite = WER权重 × min(WER, 1)
 | 0.40 – 0.60 | 一般 | 查看哪项指标拖了后腿，调整权重再决定 |
 | 0.60 – 1.00 | 较差 | 不建议作为主要方案 |
 
-### 5.3 无 Ground Truth 时的 Agreement Rank
+### 5.3 多维度排序的使用建议
 
-当你没有正确文本时，平台会计算每个 provider 与其他 provider 的「分歧度」（平均 peer WER）。**分歧度最低的 provider 最接近「所有服务的共识」**，被认为可能最准确。
+排行榜支持按 5 个维度排序，不同目的下侧重点不同：
 
-这是一种代理指标，精度低于真实 WER，但在没有标注数据时仍有参考价值。
+| 排序维度 | 适用场景 |
+|---------|---------|
+| Composite Score | 综合选型，最常用 |
+| WER | 有 ground truth，以准确率为首要标准 |
+| Latency (TTFT) | 实时听写，延迟敏感 |
+| Cost | 大规模部署，成本优先 |
+| Confidence | 评估模型自信度，筛选需要人工复核的片段 |
 
-### 5.4 读懂噪音测试结果
+### 5.4 无 Ground Truth 时的 Agreement Rank
+
+当你没有正确文本时，平台会计算每个配置与其他配置的「分歧度」（平均 peer WER）。**分歧度最低的配置最接近「所有服务的共识」**，被认为可能最准确。这是一种代理指标，适合没有标注数据时的初步筛选。
+
+### 5.5 读懂噪音测试结果
 
 对比干净音频和噪音音频的结果时，重点看：
 
@@ -329,15 +370,26 @@ Deepgram 在噪音下延迟几乎不变，Whisper 增加了 52%。
 
 **无需写任何 Python 代码**，只需在项目根目录的 `providers.yaml` 文件末尾追加一段配置。
 
-### 6.1 YAML 配置结构
+### 6.1 完整 YAML Schema
 
 ```yaml
 providers:
   - name: your_provider_id      # 唯一 ID，CLI 的 --providers 参数中使用
     display_name: "Your Provider Name"
     api_key_env: YOUR_API_KEY   # 对应 .env 中的变量名
-    cost_per_minute_usd: 0.005  # 每分钟费率（美元）
-    model_version: v1           # 传给 API 的模型版本号
+    cost_per_minute_usd: 0.005  # 默认费率（美元/分钟）
+    model_version: v1           # 默认模型版本
+
+    available_models:           # 可选：列出所有可选模型，供 UI 下拉选择
+      - id: v1
+        display_name: "V1 Standard"
+        cost_per_minute_usd: 0.005
+      - id: v2
+        display_name: "V2 Enhanced"
+        cost_per_minute_usd: 0.008
+        body_fields:            # 可选：该模型需要不同的请求参数时覆盖
+          model: "{{model_version}}"
+          response_format: json  # 例如 v2 不支持 verbose_json
 
     request:
       method: POST
@@ -349,6 +401,7 @@ providers:
         file_field: audio       # multipart 时：音频字段名
         fields:
           model: "{{model_version}}"
+          response_format: verbose_json
       params:                   # 可选：URL 查询参数
         language: en
 
@@ -360,7 +413,9 @@ providers:
       words: ~                  # 词级数组（可选，没有则写 ~）
 ```
 
-### 6.2 auth.type 说明
+### 6.2 关键字段说明
+
+**`auth.type`**
 
 | 类型 | 生成的 Header |
 |------|-------------|
@@ -368,21 +423,35 @@ providers:
 | `token` | `Authorization: Token {key}` |
 | `api-key` | `api-key: {key}` |
 
-### 6.3 response 路径格式
+**`body.type`**
 
-路径支持点号（`.`）和数组索引（`[0]`）：
+| 类型 | 说明 | 适用场景 |
+|------|------|---------|
+| `multipart` | multipart/form-data，含 `file_field` 和 `fields` | OpenAI 系列 |
+| `raw` | 直接发送音频字节，`Content-Type` 由 `content_type` 指定 | Deepgram |
+
+**`response` 路径格式**
+
+支持点号（`.`）和数组索引（`[0]`）：
 
 ```yaml
-# 简单字段
-transcript: text
-
-# 嵌套字段
-transcript: "results.channels[0].alternatives[0].transcript"
+transcript: text                                          # 顶层字段
+transcript: "results.channels[0].alternatives[0].transcript"  # 嵌套 + 数组
 ```
 
-### 6.4 完整示例
+**`body_fields` 覆盖（model 级别）**
 
-以添加 **Rev AI** 为例，只需在 `providers.yaml` 追加：
+当某个模型不支持父级 `body.fields` 中的某个参数时，在该模型的 `available_models` 条目中加 `body_fields`，会完整替换父级 fields：
+
+```yaml
+available_models:
+  - id: gpt-4o-transcribe
+    body_fields:
+      model: "{{model_version}}"
+      response_format: json   # 覆盖父级的 verbose_json
+```
+
+### 6.3 完整示例（Rev AI）
 
 ```yaml
   - name: revai
@@ -390,6 +459,13 @@ transcript: "results.channels[0].alternatives[0].transcript"
     api_key_env: REVAI_API_KEY
     cost_per_minute_usd: 0.035
     model_version: machine
+    available_models:
+      - id: machine
+        display_name: "Machine (Standard)"
+        cost_per_minute_usd: 0.035
+      - id: fusion
+        display_name: "Fusion (Enhanced)"
+        cost_per_minute_usd: 0.045
     request:
       method: POST
       url: "https://api.rev.ai/speechtotext/v1/jobs"
@@ -398,6 +474,8 @@ transcript: "results.channels[0].alternatives[0].transcript"
       body:
         type: multipart
         file_field: media
+        fields:
+          model: "{{model_version}}"
     response:
       transcript: "monologues[0].elements[0].value"
       duration: duration_seconds
@@ -411,7 +489,7 @@ transcript: "results.channels[0].alternatives[0].transcript"
 REVAI_API_KEY=your_key_here
 ```
 
-重启 Streamlit 或 CLI，Rev AI 会自动出现在 Provider 列表中。
+重启 Streamlit，Rev AI 会自动出现在 Provider 列表中，并支持 Machine / Fusion 两个模型的多选对比。
 
 ---
 
@@ -423,21 +501,27 @@ REVAI_API_KEY=your_key_here
 
 ---
 
-**Q: 上传音频后报错 "Sample audio not found"**
+**Q: WER 显示 "N/A"**
 
-使用内置样本时需要确保 `tests/fixtures/sample.wav` 存在。运行 `ls tests/fixtures/` 确认。若文件缺失，上传一个自己的音频文件即可。
+WER 只有在填写了 Ground Truth 时才会计算。没有填写 Ground Truth 时，界面显示 Agreement Rank 替代。
 
 ---
 
-**Q: WER 显示 "N/A"**
+**Q: 侧边栏提示 "provider_name: no model selected"**
 
-WER 只有在填写了 Ground Truth 时才会计算。没有填写 Ground Truth 时，界面会显示 Agreement Rank 替代。
+勾选了某个 Provider 但把 `↳ Models` 多选框里所有模型都取消了。重新在多选框里选至少一个模型即可。
 
 ---
 
 **Q: Composite Score 中 Cost weight 显示 "⚠️ invalid"**
 
 WER 权重 + Latency 权重之和超过了 1.0。降低其中一个权重，Cost 权重会自动变为正数。
+
+---
+
+**Q: gpt-4o-transcribe 报 400 Bad Request**
+
+这个模型不支持 `verbose_json` 格式。项目已通过 `body_fields` 覆盖自动处理，确保你使用的是最新版本的代码（`git pull`）。
 
 ---
 
@@ -449,7 +533,7 @@ AssemblyAI 需要额外安装：
 poetry install --extras bonus
 ```
 
-安装后勾选 "AssemblyAI" 并在 .env 填入 `ASSEMBLYAI_API_KEY`。
+安装后勾选 "AssemblyAI" 并在 `.env` 填入 `ASSEMBLYAI_API_KEY`。
 
 ---
 

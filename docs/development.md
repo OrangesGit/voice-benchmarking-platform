@@ -52,8 +52,11 @@ benchmark run --audio tests/fixtures/sample.wav
 voice-benchmarking-platform/
 ├── pyproject.toml                          # 依赖管理与项目配置
 ├── .env.example                            # 环境变量模板
+├── providers.yaml                          # YAML-driven provider/model 声明（唯一需改的文件）
+├── app.py                                  # Streamlit 网页界面
 ├── docs/
-│   └── development.md                      # 本文档
+│   ├── development.md                      # 本文档
+│   └── user-guide.md                       # 用户使用指南
 ├── src/voice_benchmarking_platform/
 │   ├── __init__.py
 │   ├── models.py                           # Pydantic 数据模型
@@ -64,15 +67,18 @@ voice-benchmarking-platform/
 │   ├── cli.py                              # Click CLI 入口
 │   └── providers/
 │       ├── base.py                         # STTProvider 抽象基类
-│       ├── openai_whisper.py               # OpenAI Whisper 实现
-│       ├── deepgram.py                     # Deepgram Nova-2 实现
-│       └── assemblyai.py                   # AssemblyAI 实现（bonus）
+│       ├── yaml_provider.py                # 通用 YAML-driven HTTP provider
+│       ├── registry.py                     # 加载 providers.yaml，解析 provider:model
+│       ├── openai_whisper.py               # OpenAI Whisper（已迁入 YAML，保留备用）
+│       ├── deepgram.py                     # Deepgram Nova-2（已迁入 YAML，保留备用）
+│       └── assemblyai.py                   # AssemblyAI 轮询实现（bonus，仍为 Python）
 └── tests/
     ├── test_scoring.py
     ├── test_benchmark.py
     ├── test_evaluator.py
     └── fixtures/
-        └── sample.wav                      # 测试音频
+        ├── sample.wav                      # 干净 TTS 测试音频（8.5s）
+        └── noisy_sample.wav                # 带白噪音测试音频（~18dB SNR）
 ```
 
 ---
@@ -111,11 +117,13 @@ render_leaderboard()  ──► Rich CLI 表格
 | 层 | 文件 | 职责 |
 |----|------|------|
 | **数据层** | `models.py` | 不可变数据模型，Pydantic 校验 |
-| **接入层** | `providers/` | 封装各厂商 API，统一返回 `TranscriptionResult` |
+| **配置层** | `providers.yaml` | Provider / 模型声明式配置（唯一需修改的文件） |
+| **注册层** | `providers/registry.py` | 加载 YAML，解析 `provider:model` 语法，实例化 provider |
+| **接入层** | `providers/yaml_provider.py` `providers/*.py` | 封装各厂商 API，统一返回 `TranscriptionResult` |
 | **评分层** | `scoring.py` | 纯函数，无副作用，可独立测试 |
 | **调度层** | `benchmark.py` | 并发控制，聚合结果 |
 | **评估层** | `evaluator.py` | 无 ground truth 时的降级评估策略 |
-| **展示层** | `leaderboard.py` | 渲染，与业务逻辑解耦 |
+| **展示层** | `leaderboard.py` `app.py` | Rich CLI 表格 / Streamlit 网页界面 |
 | **入口层** | `cli.py` | 参数解析，组装各层，不含业务逻辑 |
 
 ---
@@ -200,10 +208,106 @@ async with client.stream("POST", url, ...) as response:
 
 ### 5.3 新增 Provider 步骤
 
+**推荐：YAML 声明式（无需 Python 代码）**
+
+在 `providers.yaml` 追加一个 provider 块，重启即可。适用于标准 REST API（multipart 上传或 raw 字节）。详见第 5.4 节。
+
+**备选：Python 实现（需要轮询 / WebSocket 的服务）**
+
 1. 在 `providers/` 下新建文件，继承 `STTProvider`
 2. 实现 `provider_name`、`cost_per_minute_usd`、`transcribe_async`
-3. 在 `providers/__init__.py` 中导出
-4. 在 `cli.py` 的 `_build_runner()` 中添加 `elif name == "your_provider":` 分支
+3. 在 `cli.py` 的 `_build_runner()` 中添加 fallback 分支（参考 assemblyai 的处理方式）
+
+### 5.4 YAML Provider Registry
+
+#### 设计目标
+
+新增一个 STT provider **无需写 Python 代码**，只需在 `providers.yaml` 追加配置，CLI 和 Streamlit UI 自动发现并加载，包括模型多选。
+
+#### YAML Schema
+
+```yaml
+providers:
+  - name: deepgram                    # 唯一 ID（CLI --providers 使用）
+    display_name: "Deepgram"          # UI 展示名称
+    api_key_env: DEEPGRAM_API_KEY     # .env 变量名
+    cost_per_minute_usd: 0.0043       # 默认费率
+    model_version: nova-2             # 默认模型
+
+    available_models:                 # 可选列表，UI 多选/CLI provider:model
+      - id: nova-2
+        display_name: "Nova-2"
+        cost_per_minute_usd: 0.0043
+      - id: base
+        display_name: "Base"
+        cost_per_minute_usd: 0.0025
+        body_fields:                  # 覆盖父级 body.fields（该模型专用参数）
+          model: "{{model_version}}"
+          response_format: json
+
+    request:
+      method: POST
+      url: "https://api.deepgram.com/v1/listen"
+      auth:
+        type: token                   # bearer | token | api-key
+      params:
+        model: "{{model_version}}"    # {{model_version}} 自动替换为选中模型 ID
+      body:
+        type: raw                     # multipart | raw
+        content_type: audio/wav
+
+    response:
+      transcript: "results.channels[0].alternatives[0].transcript"
+      duration: "metadata.duration"
+      confidence: "results.channels[0].alternatives[0].confidence"
+      words: "results.channels[0].alternatives[0].words"
+```
+
+#### `provider_name` 命名规则
+
+`YAMLProvider.provider_name` 始终返回 `{name}:{model}`（如 `deepgram:nova-2`），使同一供应商的不同模型在同一次 benchmark 中可以共存。
+
+#### `body_fields` 覆盖机制
+
+部分模型不支持父级 `body.fields` 中的某个参数（例如 `gpt-4o-transcribe` 不支持 `verbose_json`）：
+
+```yaml
+available_models:
+  - id: gpt-4o-transcribe
+    body_fields:
+      model: "{{model_version}}"
+      response_format: json   # 完整替换父级 fields
+```
+
+`YAMLProvider` 在构建请求时，**优先使用模型级 `body_fields`，找不到才退回到父级 `body.fields`**。
+
+#### `response` 路径提取
+
+dot-notation + 数组索引，不依赖外部 JSONPath 库：
+
+```python
+# 支持 "results.channels[0].alternatives[0].transcript"
+def _extract(data, path):
+    for part in re.split(r"\.(?![^\[]*\])", path):
+        m = re.match(r"^(\w+)\[(\d+)\]$", part)
+        data = data[m.group(1)][int(m.group(2))] if m else data[part]
+    return data
+```
+
+**时长回退**：当 API 不返回 `duration`（如使用 `json` 格式时），自动从 WAV 文件头读取时长，保证费用计算正确。
+
+#### `registry.py` 关键接口
+
+```python
+# 加载所有 YAML provider（使用默认模型）
+load_yaml_providers() -> list[YAMLProvider]
+
+# 按名称实例化，支持 "provider" 或 "provider:model"
+get_provider_by_name("deepgram:base", api_key=None) -> YAMLProvider | None
+
+# 返回所有 provider 的元数据（含 available_models），供 UI 构建下拉
+list_available_providers() -> list[dict]
+```
 
 ---
 
@@ -338,6 +442,20 @@ benchmark run \
   --providers openai_whisper,deepgram \
   --wer-weight 0.5 --latency-weight 0.3 --cost-weight 0.2 \
   --output table   # 或 json
+```
+
+**指定模型（`provider:model` 语法）**
+
+```bash
+# 固定模型
+benchmark run --audio audio.wav --providers deepgram:nova-2,openai_whisper:whisper-1
+
+# 同供应商多模型对比
+benchmark run --audio audio.wav --providers deepgram:nova-2,deepgram:base
+
+# 跨供应商多模型全量对比
+benchmark run --audio audio.wav \
+  --providers deepgram:nova-2,deepgram:base,openai_whisper:whisper-1,openai_whisper:gpt-4o-mini-transcribe
 ```
 
 **单文件 benchmark（无 ground truth）**
